@@ -1,0 +1,24 @@
+{
+  "name": "chapter5-handson1",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "mastra dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^5.0.117",
+    "@mastra/core": "^1.78.0",
+    "mastra": "^1.34.2"
+  }
+}
