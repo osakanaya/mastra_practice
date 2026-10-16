@@ -2,6 +2,9 @@ import { scoreTracesWorkflow } from '@mastra/core/evals/scoreTraces';
 import { Mastra } from '@mastra/core/mastra';
 import { Agent } from '@mastra/core/agent';
 import { bedrock } from '@ai-sdk/amazon-bedrock';
+import { createWorkflow, createStep } from '@mastra/core/workflows';
+import { confluenceSearchPagesTool, confluenceGetPageTool } from './tools/2eb020a6-8b0d-70df-ebdc-a2289f2de63d.mjs';
+import { z } from 'zod';
 import { existsSync, createReadStream, statSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join, dirname } from 'path';
@@ -13,7 +16,7 @@ import { Http2ServerRequest, constants } from 'http2';
 import process$1, { versions } from 'process';
 import { Tool } from '@mastra/core/tools';
 import { n as normalizeRoutePath, f as findMatchingCustomRoute, i as isReservedRequestContextKey, a as isStudioClientTypeHeader, M as MASTRA_IS_STUDIO_KEY, b as MASTRA_CLIENT_TYPE_HEADER, c as MASTRA_AUTH_MODE_KEY, d as coreAuthMiddleware, S as SERVER_ROUTES, p as pathMatchesPattern, e as isCustomRoutePublic, g as generateOpenAPIDocument, h as convertCustomRoutesToOpenAPIPaths, j as formatZodError, H as HTTPException$1, k as MASTRA_USER_KEY, l as MASTRA_AUTH_TOKEN_KEY, m as MASTRA_RESOURCE_ID_KEY, I as InMemoryTaskStore, o as isZodError } from './routes-CH2PZ0PI.mjs';
-import { z } from 'zod/v4';
+import { z as z$1 } from 'zod/v4';
 import { RequestContext } from '@mastra/core/request-context';
 import { MastraServerBase } from '@mastra/core/server';
 import { safeStringify } from '@mastra/core/utils';
@@ -26,7 +29,6 @@ import 'zod/v3';
 import 'module';
 import '@mastra/core/schema';
 import '@mastra/core/utils/zod-to-json';
-import 'zod';
 import '@mastra/core/auth/ee';
 import '@mastra/core/memory';
 import '@mastra/core/stream';
@@ -51,9 +53,164 @@ const assistantAgent = new Agent({
   model: bedrock("us.anthropic.claude-sonnet-5-5")
 });
 
+const confluenceSearchPageStep = createStep(confluenceSearchPagesTool);
+const confluenceGetPageStep = createStep(confluenceGetPageTool);
+const handsonWorkflow = createWorkflow({
+  id: "handsonWorkflow",
+  description: "\u81EA\u7136\u8A00\u8A9E\u306E\u8CEA\u554F\u304B\u3089Confluence\u3067\u8981\u4EF6\u6240\u3092\u691C\u7D22\u3057\u3001\u5185\u5BB9\u3092\u8981\u7D04\u3057\u3066\u56DE\u7B54\u3057\u307E\u3059\u3002",
+  inputSchema: z.object({
+    query: z.string().describe("\u691C\u7D22\u3057\u305F\u3044\u5185\u5BB9\u3092\u81EA\u7136\u8A00\u8A9E\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u4F8B\uFF1A\u300CAI\u306B\u3064\u3044\u3066\u306E\u60C5\u5831\u300D\u300C\u6700\u65B0\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u60C5\u5831\u300D\uFF09")
+  }),
+  outputSchema: z.object({
+    text: z.string().describe("\u8981\u7D04\u3055\u308C\u305F\u56DE\u7B54")
+  })
+}).then(
+  createStep({
+    id: "generate-cql-query",
+    inputSchema: z.object({
+      query: z.string()
+    }),
+    outputSchema: z.object({
+      cql: z.string()
+    }),
+    execute: async ({ inputData }) => {
+      const prompt = `
+\u4EE5\u4E0B\u306E\u81EA\u7136\u8A00\u8A9E\u306E\u691C\u7D22\u8981\u6C42\u3092Confluence CQL (Confluence Query Language)\u306B\u5909\u63DB\u3057\u3066\u304F\u3060\u3055\u3044\u3002
+CQL\u306E\u57FA\u672C\u7684\u306A\u69CB\u6587\uFF1A
+- text ~ "\u691C\u7D22\u8A9E"\uFF1A\u5168\u6587\u691C\u7D22
+- title ~ "\u30BF\u30A4\u30C8\u30EB"\uFF1A\u30BF\u30A4\u30C8\u30EB\u691C\u7D22
+- space = "\u30B9\u30DA\u30FC\u30B9\u30AD\u30FC"\uFF1A\u7279\u5B9A\u306E\u30B9\u30DA\u30FC\u30B9\u5185\u691C\u7D22
+- type = page\uFF1A\u30DA\u30FC\u30B8\u306E\u307F\u691C\u7D22
+- created >= "2024-01-01"\uFF1A\u65E5\u4ED8\u30D5\u30A3\u30EB\u30BF
+
+
+\u691C\u7D22\u8981\u6C42: ${inputData.query}
+
+
+\u91CD\u8981\uFF1A
+- \u5358\u7D14\u306A\u5358\u8A9E\u691C\u7D22\u306E\u5834\u5408\u306F\u3001text ~ "\u5358\u8A9E" \u306E\u5F62\u5F0F\u3092\u4F7F\u7528
+- \u8907\u6570\u306E\u5358\u8A9E\u3092\u542B\u3080\u5834\u5408\u306F AND \u3067\u7D50\u5408
+- \u65E5\u672C\u8A9E\u306E\u691C\u7D22\u8A9E\u3082\u305D\u306E\u307E\u307E\u4F7F\u7528\u53EF\u80FD
+- \u30EC\u30B9\u30DD\u30F3\u30B9\u306FCQL\u30AF\u30A8\u30EA\u306E\u307F\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044
+
+
+CQL\u30AF\u30A8\u30EA:`;
+      try {
+        const result = await assistantAgent.generate(prompt);
+        const cql = result.text.trim();
+        return { cql };
+      } catch (error) {
+        const fallbackCql = `text ~ "${inputData.query}"`;
+        return { cql: fallbackCql };
+      }
+    }
+  })
+).then(confluenceSearchPageStep).then(
+  createStep({
+    id: "select-first-page",
+    inputSchema: z.object({
+      pages: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          url: z.string().optional()
+        })
+      )
+    }),
+    outputSchema: z.object({
+      pageId: z.string(),
+      expand: z.string().optional()
+    }),
+    execute: async ({ inputData }) => {
+      const { pages, error } = inputData;
+      if (error) {
+        throw new Error(`\u691C\u7D22\u30A8\u30E9\u30FC: ${error}`);
+      }
+      if (!pages || pages.length == 0) {
+        throw new Error("\u691C\u7D22\u7D50\u679C\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
+      }
+      const firstPage = pages[0];
+      return {
+        pageId: firstPage.id,
+        expand: "body.storage"
+      };
+    }
+  })
+).then(confluenceGetPageStep).then(
+  createStep({
+    id: "prepare-prompt",
+    inputSchema: z.object({
+      page: z.object({
+        id: z.string(),
+        title: z.string(),
+        url: z.string(),
+        content: z.string().optional()
+      }),
+      error: z.string().optional()
+    }),
+    outputSchema: z.object({
+      prompt: z.string(),
+      originalQuery: z.string(),
+      pageTitle: z.string(),
+      pageUrl: z.string()
+    }),
+    execute: async ({ inputData, getInitData }) => {
+      const { page, error } = inputData;
+      const initData = getInitData();
+      if (error || !page || !page.content) {
+        return {
+          prompt: "\u30DA\u30FC\u30B8\u306E\u5185\u5BB9\u304C\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+          originalQuery: initData.query || "",
+          pageTitle: page?.title || "\u4E0D\u660E",
+          pageUrl: page?.url || ""
+        };
+      }
+      const prompt = `\u4EE5\u4E0B\u306EConfluence\u30DA\u30FC\u30B8\u306E\u5185\u5BB9\u306B\u57FA\u3065\u3044\u3066\u3001\u30E6\u30FC\u30B6\u30FC\u306E\u8CEA\u554F\u306B\u7B54\u3048\u3066\u304F\u3060\u3055\u3044\u3002
+
+\u30E6\u30FC\u30B6\u30FC\u306E\u8CEA\u554F: ${initData.query}
+
+\u30DA\u30FC\u30B8\u30BF\u30A4\u30C8\u30EB: ${page.title}
+\u30DA\u30FC\u30B8\u5185\u5BB9:
+${page.content}
+
+\u56DE\u7B54\u306F\u7C21\u6F54\u3067\u5206\u304B\u308A\u3084\u3059\u304F\u3001\u5FC5\u8981\u306B\u5FDC\u3058\u3066\u7B87\u6761\u66F8\u304D\u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044\u3002`;
+      return {
+        prompt,
+        originalQuery: initData.query || "",
+        pageTitle: page.title,
+        pageUrl: page.url
+      };
+    }
+  })
+).then(
+  createStep({
+    id: "assistant-response",
+    inputSchema: z.object({
+      prompt: z.string(),
+      originalQuery: z.string(),
+      pageTitle: z.string(),
+      pageUrl: z.string()
+    }),
+    outputSchema: z.object({ text: z.string() }),
+    execute: async ({ inputData }) => {
+      try {
+        const result = await assistantAgent.generate(inputData.prompt);
+        return {
+          text: result.text
+        };
+      } catch (error) {
+        return { text: "\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F\uFF1A " + String(errror) };
+      }
+    }
+  })
+).commit();
+
 const mastra = new Mastra({
   agents: {
     assistantAgent
+  },
+  workflows: {
+    handsonWorkflow
   }
 });
 
@@ -2775,7 +2932,7 @@ function unwrapOptionalNullable(schema) {
 	return inner;
 }
 function parseComplexQueryParams(queryParamSchema, params) {
-	if (!(queryParamSchema instanceof z.ZodObject)) return params;
+	if (!(queryParamSchema instanceof z$1.ZodObject)) return params;
 	const parsedParams = { ...params };
 	const shape = queryParamSchema.shape;
 	for (const [key, fieldSchema] of Object.entries(shape)) {
