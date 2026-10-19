@@ -9,7 +9,7 @@ function getAuthHeaders() {
     `${CONFLUENCE_USER_EMAIL}:${CONFLUENCE_API_TOKEN}`
   ).toString("base64");
   return {
-    Authorization: `Bassic ${auth}`,
+    Authorization: `Basic ${auth}`,
     Accept: "application/json",
     "Content-Type": "application/json"
   };
@@ -26,6 +26,7 @@ async function callConfluenceAPI(endpoint, options = {}) {
   if (!response.ok) {
     throw new Error(`Confluence API error: ${response.status}`);
   }
+  return response.json();
 }
 const confluenceSearchPagesTool = createTool({
   id: "confluence-search-pages",
@@ -44,10 +45,9 @@ const confluenceSearchPagesTool = createTool({
     total: z.number().describe("\u691C\u7D22\u7D50\u679C\u306E\u7DCF\u6570"),
     error: z.string().optional().describe("\u30A8\u30E9\u30FC\u30E1\u30C3\u30BB\u30FC\u30B8")
   }),
-  execute: async ({ context }) => {
-    console.log(context);
+  execute: async (input) => {
     const params = new URLSearchParams();
-    params.append("cql", context.cql);
+    params.append("cql", input.cql);
     try {
       const data = await callConfluenceAPI(`/search?${params.toString()}`);
       const pages = data.results.map((result) => ({
@@ -77,18 +77,18 @@ const confluenceGetPageTool = createTool({
     }),
     error: z.string().optional().describe("\u30A8\u30E9\u30FC\u30E1\u30C3\u30BB\u30FC\u30B8")
   }),
-  execute: async ({ context }) => {
+  execute: async (input) => {
     const params = new URLSearchParams();
-    if (context.expand) params.append("expand", context.expand);
+    if (input.expand) params.append("expand", input.expand);
     try {
-      const endpoint = `/content/${context.pageId}${params.toString() ? `?${params.toString()}` : ""}`;
+      const endpoint = `/content/${input.pageId}${params.toString() ? `?${params.toString()}` : ""}`;
       const page = await callConfluenceAPI(endpoint);
       return {
         page: {
           id: page.id,
           title: page.title,
           url: `${CONFLUENCE_BASE_URL}/wiki${page._links?.webui}`,
-          content: page.body?.strage?.value || void 0
+          content: page.body?.storage?.value || void 0
         }
       };
     } catch (error) {
