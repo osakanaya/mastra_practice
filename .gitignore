@@ -1,1 +1,25 @@
 .env
+.claude
+
+# Node.js関連
+node_modules/
+package-lock.json
+.next/
+dist/
+.cache/
+*.tsbuildinfo
+
+# Python関連
+__pycache__
+*.pyc
+.venv/
+.python-version
+
+# Streamlit関連
+.streamlit
+
+# Bedrock AgentCore関連
+.bedrock_agentcore.yaml
+.dockerignore
+Dockerfile
+
