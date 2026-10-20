@@ -23,3 +23,9 @@ __pycache__
 .dockerignore
 Dockerfile
 
+.mastra
+
+# amplify
+.amplify
+amplify_outputs*
+amplifyconfiguration*
